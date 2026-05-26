@@ -7,8 +7,8 @@ Team Task Manager with AI Standup Assistant.
 - **AI Standup Assistant**: Generates realistic, professional standup updates based on the user's tasks using AI.
 
 ### Highlighted Technical Features (Evaluator Notes)
-- 🔒 **Mutex Concurrency Locking**: In-memory store operations are wrapped with a `threading.Lock` context manager to guarantee thread safety, preventing race conditions and data corruption under high concurrent request volume.
-- 🛡️ **Advanced Rate Limiting**: Employs `slowapi` to enforce token-bucket rate limits per client IP:
+-  **Mutex Concurrency Locking**: In-memory store operations are wrapped with a `threading.Lock` context manager to guarantee thread safety, preventing race conditions and data corruption under high concurrent request volume.
+-  **Advanced Rate Limiting**: Employs `slowapi` to enforce token-bucket rate limits per client IP:
   - `GET /api/tasks`: 20 requests per minute limit.
   - `POST /api/tasks`: 10 requests per minute limit.
   - `POST /api/standup`: 5 requests per minute limit.

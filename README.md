@@ -41,4 +41,5 @@ Team Task Manager with AI Standup Assistant.
 - `backend/`: FastAPI Python application.
 
 ## Screenshots / Demo
-*(Add screenshots/demo GIF here)*
+<img width="1470" height="834" alt="image" src="https://github.com/user-attachments/assets/baf0c714-a760-47b6-a2d6-a309e39ca5fe" />
+

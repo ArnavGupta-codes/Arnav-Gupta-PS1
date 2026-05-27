@@ -63,6 +63,22 @@ export default function Home() {
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dragOverColumn, setDragOverColumn] = useState<string | null>(null);
 
+  // Load session from localStorage on mount
+  useEffect(() => {
+    const savedUser = localStorage.getItem("ff_username");
+    const savedOrg = localStorage.getItem("ff_orgCode");
+    const savedLoggedIn = localStorage.getItem("ff_isLoggedIn") === "true";
+
+    if (savedLoggedIn && savedUser) {
+      setUsername(savedUser);
+      setIsLoggedIn(true);
+      if (savedOrg) {
+        setOrgCode(savedOrg);
+        checkUserRole(savedOrg, savedUser);
+      }
+    }
+  }, []);
+
   // Dark mode sync
   useEffect(() => {
     if (darkMode) {
@@ -83,11 +99,11 @@ export default function Home() {
   useEffect(() => {
     if (userRole === "pending" && orgCode) {
       const interval = setInterval(() => {
-        checkUserRole(orgCode);
+        checkUserRole(orgCode, username);
       }, 5000);
       return () => clearInterval(interval);
     }
-  }, [userRole, orgCode]);
+  }, [userRole, orgCode, username]);
 
   // ==========================================
   // AUTH HANDLERS
@@ -108,7 +124,21 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || "Authentication failed");
+      
       setIsLoggedIn(true);
+      localStorage.setItem("ff_isLoggedIn", "true");
+      localStorage.setItem("ff_username", data.username);
+      
+      if (data.org_code) {
+        setOrgCode(data.org_code);
+        localStorage.setItem("ff_orgCode", data.org_code);
+        const computedRole = data.status === "approved" ? data.role : data.status;
+        setUserRole(computedRole);
+        localStorage.setItem("ff_role", computedRole);
+        if (data.status === "approved") {
+          fetchTasks(data.org_code);
+        }
+      }
     } catch (err: any) {
       setAuthError(err.message);
     } finally {
@@ -124,17 +154,23 @@ export default function Home() {
     setUserRole("none");
     setTasks([]);
     setStandups([]);
+    localStorage.removeItem("ff_isLoggedIn");
+    localStorage.removeItem("ff_username");
+    localStorage.removeItem("ff_orgCode");
+    localStorage.removeItem("ff_role");
   };
 
   // ==========================================
   // ORG HANDLERS
   // ==========================================
-  const checkUserRole = async (code: string) => {
+  const checkUserRole = async (code: string, user: string = username) => {
     try {
-      const res = await fetch(`${BACKEND_API_URL}/orgs/${code}/role?username=${username}`);
+      const res = await fetch(`${BACKEND_API_URL}/orgs/${code}/role?username=${user}`);
       if (res.ok) {
         const data = await res.json();
-        setUserRole(data.status === "approved" ? data.role : data.status);
+        const computedRole = data.status === "approved" ? data.role : data.status;
+        setUserRole(computedRole);
+        localStorage.setItem("ff_role", computedRole);
         if (data.status === "approved") {
           fetchTasks(code);
         }
@@ -148,13 +184,16 @@ export default function Home() {
     const code = orgInput.trim().toUpperCase();
     if (!code) return;
     setOrgCode(code);
+    localStorage.setItem("ff_orgCode", code);
     try {
       const res = await fetch(`${BACKEND_API_URL}/orgs/${code}/request?username=${username}`, {
         method: "POST",
       });
       if (res.ok) {
         const data = await res.json();
-        setUserRole(data.status);
+        const computedRole = data.status === "approved" ? data.role : data.status;
+        setUserRole(computedRole);
+        localStorage.setItem("ff_role", computedRole);
         if (data.status === "approved") {
           fetchTasks(code);
         }
@@ -162,10 +201,14 @@ export default function Home() {
         const errorData = await res.json();
         alert(errorData.detail || "Failed to join organization");
         setOrgCode("");
+        localStorage.removeItem("ff_orgCode");
+        localStorage.removeItem("ff_role");
       }
     } catch (err) {
       console.error("Failed to join org:", err);
       setOrgCode("");
+      localStorage.removeItem("ff_orgCode");
+      localStorage.removeItem("ff_role");
     }
   };
 
@@ -178,6 +221,8 @@ export default function Home() {
       if (res.ok) {
         setOrgCode(code);
         setUserRole("admin");
+        localStorage.setItem("ff_orgCode", code);
+        localStorage.setItem("ff_role", "admin");
         setTasks([]);
       }
     } catch (err) {
@@ -190,6 +235,8 @@ export default function Home() {
     setUserRole("none");
     setTasks([]);
     setStandups([]);
+    localStorage.removeItem("ff_orgCode");
+    localStorage.removeItem("ff_role");
   };
 
   // ==========================================
@@ -314,6 +361,9 @@ export default function Home() {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     setDragOverColumn(column);
+  };
+  const onDragLeave = () => {
+    setDragOverColumn(null);
   };
   const onDrop = (e: React.DragEvent, column: string) => {
     e.preventDefault();

@@ -10,6 +10,21 @@ import uuid
 import hashlib
 import os
 import binascii
+import urllib.request
+import json
+import ssl
+
+# ==========================================
+# ENVIRONMENT CONFIGURATION (.env loader)
+# ==========================================
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+if os.path.exists(env_path):
+    with open(env_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                key, val = line.split("=", 1)
+                os.environ[key.strip()] = val.strip().strip('"').strip("'")
 
 # ==========================================
 # AUTH CONFIGURATION
@@ -132,10 +147,35 @@ def login_user(request: Request, user: UserCreate):
     c = conn.cursor()
     c.execute("SELECT password_hash FROM users WHERE username = ?", (user.username,))
     row = c.fetchone()
-    conn.close()
     if not row or not verify_password(user.password, row["password_hash"]):
+        conn.close()
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    return {"message": "Login successful", "username": user.username}
+    
+    # Check if user has an active organization request or membership
+    c.execute("SELECT org_code, status FROM org_members WHERE username = ?", (user.username,))
+    member_row = c.fetchone()
+    org_code = None
+    role = "none"
+    status = "none"
+    if member_row:
+        org_code = member_row["org_code"]
+        status = member_row["status"]
+        # Check if admin
+        c.execute("SELECT admin_username FROM organizations WHERE org_code = ?", (org_code,))
+        org_row = c.fetchone()
+        if org_row and org_row["admin_username"] == user.username:
+            role = "admin"
+        else:
+            role = "member"
+            
+    conn.close()
+    return {
+        "message": "Login successful", 
+        "username": user.username,
+        "org_code": org_code,
+        "role": role,
+        "status": status
+    }
 
 # ==========================================
 # ORGANIZATION ENDPOINTS
@@ -312,12 +352,57 @@ def update_task_status(request: Request, task_id: str, body: StatusUpdate):
     return {"message": "Status updated"}
 
 # ==========================================
+# GEMINI API HELPER
+# ==========================================
+def call_gemini_api(prompt: str) -> Optional[str]:
+    """Call Google's Gemini API directly using standard library HTTP client."""
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key or api_key == "your_gemini_api_key_here":
+        return None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key={api_key}"
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt}
+                ]
+            }
+        ]
+    }
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        context = ssl._create_unverified_context()
+        # Using a 12 second timeout for external API call
+        with urllib.request.urlopen(req, timeout=12, context=context) as response:
+            res_data = json.loads(response.read().decode("utf-8"))
+            candidates = res_data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    return parts[0].get("text", "").strip()
+    except Exception as e:
+        print(f"Gemini API call failed, falling back to template: {e}")
+        if hasattr(e, 'read'):
+            try:
+                err_resp = e.read().decode('utf-8')
+                print(f"Gemini API error details: {err_resp}")
+            except Exception:
+                pass
+    return None
+
+# ==========================================
 # AI STANDUP ENDPOINT — generates for ALL members
 # ==========================================
 @app.post("/api/standup")
 @limiter.limit("5/minute")
 def generate_standup(request: Request, org_code: str = Query(...)):
-    """Generate standup for ALL members in the organization."""
+    """Generate standup for ALL members in the organization using Gemini if configured, otherwise falls back to template."""
+    import concurrent.futures
     conn = get_db()
     c = conn.cursor()
     # Get all approved members
@@ -331,8 +416,7 @@ def generate_standup(request: Request, org_code: str = Query(...)):
     if not members:
         return {"standup_updates": []}
 
-    updates = []
-    for member in members:
+    def generate_member_update(member):
         member_done = [r["title"] for r in rows if r["status"] == "Done" and r["assignee"] == member]
         member_wip = [r["title"] for r in rows if r["status"] == "In Progress" and r["assignee"] == member]
         member_todo = [r["title"] for r in rows if r["status"] == "Todo" and r["assignee"] == member]
@@ -340,11 +424,27 @@ def generate_standup(request: Request, org_code: str = Query(...)):
         yesterday = ", ".join(member_done) if member_done else "no completed tasks"
         today = ", ".join(member_wip + member_todo) if (member_wip or member_todo) else "no pending tasks"
 
-        update_text = (
-            f"Completed: {yesterday}.\n"
-            f"Working on: {today}.\n"
-            f"Blockers: none."
+        # Check if Gemini API key exists, otherwise use fallback template
+        prompt = (
+            f"Generate a short, professional, daily standup update in 1-3 sentences for a team member named {member}.\n"
+            f"Their task details are:\n"
+            f"- Completed tasks: {yesterday}\n"
+            f"- Current/Pending tasks: {today}\n"
+            f"- Blockers: None\n\n"
+            f"Write it in the first person (e.g. 'Yesterday I completed...'). Keep it extremely concise and direct."
         )
-        updates.append({"username": member, "update": update_text})
+
+        update_text = call_gemini_api(prompt)
+        if not update_text:
+            # Fallback template
+            update_text = (
+                f"Completed: {yesterday}.\n"
+                f"Working on: {today}.\n"
+                f"Blockers: none."
+            )
+        return {"username": member, "update": update_text}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, len(members))) as executor:
+        updates = list(executor.map(generate_member_update, members))
 
     return {"standup_updates": updates}

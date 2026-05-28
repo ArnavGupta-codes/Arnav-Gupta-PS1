@@ -158,7 +158,16 @@ def register_user(request: Request, user: UserCreate):
         c.execute("INSERT INTO users (username, password_hash) VALUES (?, ?)",
                   (user.username, get_password_hash(user.password)))
         conn.commit()
-        return {"message": "User created successfully", "username": user.username}
+        access_token = create_access_token(data={"sub": user.username})
+        return {
+            "message": "User created successfully",
+            "username": user.username,
+            "access_token": access_token,
+            "token_type": "bearer",
+            "org_code": None,
+            "role": "none",
+            "status": "none"
+        }
     except sqlite3.IntegrityError:
         raise HTTPException(status_code=400, detail="Username already taken")
     finally:

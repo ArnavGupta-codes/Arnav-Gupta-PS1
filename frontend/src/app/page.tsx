@@ -6,8 +6,13 @@ import { Sun, Moon, LogOut, Copy, Zap, Plus, X, Users, Check, XCircle } from "lu
 // ==========================================
 // CONFIGURABLE: Change this to your deployed backend URL
 // ==========================================
-const BACKEND_API_URL = "http://localhost:8000/api";
+const BACKEND_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 const TASK_STATUS_COLUMNS = ["Todo", "In Progress", "Done"];
+
+const getAuthHeaders = () => {
+  const token = localStorage.getItem("ff_token");
+  return token ? { "Authorization": `Bearer ${token}` } : {};
+};
 
 type Task = {
   id: string;
@@ -27,6 +32,30 @@ type PendingRequest = {
   username: string;
   status: string;
 };
+
+const Header = ({ username, isLoggedIn, darkMode, setDarkMode, handleLogout }: any) => (
+  <header className="flex justify-between items-center mb-8">
+    <div>
+      <h1 className="text-3xl font-extrabold text-blue-600 dark:text-blue-400">FocusFlow</h1>
+      <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Team Task Manager</p>
+    </div>
+    <div className="flex items-center gap-3">
+      {isLoggedIn && (
+        <>
+          <span className="text-sm text-slate-500 dark:text-slate-400 font-medium">
+            Signed in as <span className="font-bold text-slate-700 dark:text-slate-200">{username}</span>
+          </span>
+          <button onClick={handleLogout} className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors" title="Sign Out">
+            <LogOut size={18} />
+          </button>
+        </>
+      )}
+      <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors" title="Toggle Theme">
+        {darkMode ? <Sun size={18} /> : <Moon size={18} />}
+      </button>
+    </div>
+  </header>
+);
 
 export default function Home() {
   // Theme
@@ -128,6 +157,9 @@ export default function Home() {
       setIsLoggedIn(true);
       localStorage.setItem("ff_isLoggedIn", "true");
       localStorage.setItem("ff_username", data.username);
+      if (data.access_token) {
+        localStorage.setItem("ff_token", data.access_token);
+      }
       
       if (data.org_code) {
         setOrgCode(data.org_code);
@@ -158,6 +190,7 @@ export default function Home() {
     localStorage.removeItem("ff_username");
     localStorage.removeItem("ff_orgCode");
     localStorage.removeItem("ff_role");
+    localStorage.removeItem("ff_token");
   };
 
   // ==========================================
@@ -165,7 +198,9 @@ export default function Home() {
   // ==========================================
   const checkUserRole = async (code: string, user: string = username) => {
     try {
-      const res = await fetch(`${BACKEND_API_URL}/orgs/${code}/role?username=${user}`);
+      const res = await fetch(`${BACKEND_API_URL}/orgs/${code}/role?username=${user}`, {
+        headers: { ...getAuthHeaders() }
+      });
       if (res.ok) {
         const data = await res.json();
         const computedRole = data.status === "approved" ? data.role : data.status;
@@ -188,6 +223,7 @@ export default function Home() {
     try {
       const res = await fetch(`${BACKEND_API_URL}/orgs/${code}/request?username=${username}`, {
         method: "POST",
+        headers: { ...getAuthHeaders() }
       });
       if (res.ok) {
         const data = await res.json();
@@ -217,6 +253,7 @@ export default function Home() {
     try {
       const res = await fetch(`${BACKEND_API_URL}/orgs?org_code=${code}&username=${username}`, {
         method: "POST",
+        headers: { ...getAuthHeaders() }
       });
       if (res.ok) {
         setOrgCode(code);
@@ -244,7 +281,9 @@ export default function Home() {
   // ==========================================
   const fetchPendingRequests = async () => {
     try {
-      const res = await fetch(`${BACKEND_API_URL}/orgs/${orgCode}/requests?username=${username}`);
+      const res = await fetch(`${BACKEND_API_URL}/orgs/${orgCode}/requests?username=${username}`, {
+        headers: { ...getAuthHeaders() }
+      });
       if (res.ok) setPendingRequests(await res.json());
     } catch (err) {
       console.error("Failed to fetch requests:", err);
@@ -255,7 +294,7 @@ export default function Home() {
     try {
       const res = await fetch(`${BACKEND_API_URL}/orgs/${orgCode}/members/${memberUsername}?username=${username}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ action }),
       });
       if (res.ok) {
@@ -276,7 +315,9 @@ export default function Home() {
   // ==========================================
   const fetchTasks = async (code: string) => {
     try {
-      const res = await fetch(`${BACKEND_API_URL}/tasks?org_code=${code}`);
+      const res = await fetch(`${BACKEND_API_URL}/tasks?org_code=${code}`, {
+        headers: { ...getAuthHeaders() }
+      });
       if (res.ok) setTasks(await res.json());
     } catch (err) {
       console.error("Failed to fetch tasks:", err);
@@ -288,7 +329,7 @@ export default function Home() {
     try {
       const res = await fetch(`${BACKEND_API_URL}/tasks?org_code=${orgCode}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({
           title: newTaskTitle.trim(),
           priority: "Medium",
@@ -309,7 +350,10 @@ export default function Home() {
 
   const handleDeleteTask = async (taskId: string) => {
     try {
-      const res = await fetch(`${BACKEND_API_URL}/tasks/${taskId}`, { method: "DELETE" });
+      const res = await fetch(`${BACKEND_API_URL}/tasks/${taskId}`, { 
+        method: "DELETE",
+        headers: { ...getAuthHeaders() }
+      });
       if (res.ok) fetchTasks(orgCode);
     } catch (err) {
       console.error("Failed to delete task:", err);
@@ -321,7 +365,7 @@ export default function Home() {
     try {
       const res = await fetch(`${BACKEND_API_URL}/tasks/${taskId}/status`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getAuthHeaders() },
         body: JSON.stringify({ status: newStatus }),
       });
       if (res.ok) fetchTasks(orgCode);
@@ -334,7 +378,10 @@ export default function Home() {
   const handleGenerateStandup = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${BACKEND_API_URL}/standup?org_code=${orgCode}`, { method: "POST" });
+      const res = await fetch(`${BACKEND_API_URL}/standup?org_code=${orgCode}`, { 
+        method: "POST",
+        headers: { ...getAuthHeaders() }
+      });
       const data = await res.json();
       setStandups(data.standup_updates);
     } catch (err) {
@@ -376,40 +423,13 @@ export default function Home() {
   };
 
   // ==========================================
-  // COMPONENTS
-  // ==========================================
-  const Header = () => (
-    <header className="flex justify-between items-center mb-8">
-      <div>
-        <h1 className="text-3xl font-extrabold text-blue-600 dark:text-blue-400">FocusFlow</h1>
-        <p className="text-slate-500 dark:text-slate-400 text-sm mt-1">Team Task Manager</p>
-      </div>
-      <div className="flex items-center gap-3">
-        {isLoggedIn && (
-          <>
-            <span className="text-sm text-slate-500 dark:text-slate-400 font-medium">
-              Signed in as <span className="font-bold text-slate-700 dark:text-slate-200">{username}</span>
-            </span>
-            <button onClick={handleLogout} className="p-2 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 transition-colors" title="Sign Out">
-              <LogOut size={18} />
-            </button>
-          </>
-        )}
-        <button onClick={() => setDarkMode(!darkMode)} className="p-2 rounded-lg bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors" title="Toggle Theme">
-          {darkMode ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
-      </div>
-    </header>
-  );
-
-  // ==========================================
   // SCREEN 1: LOGIN / REGISTER
   // ==========================================
   if (!isLoggedIn) {
     return (
       <main className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 flex items-center justify-center p-6">
         <div className="w-full max-w-md">
-          <Header />
+          <Header username={username} isLoggedIn={isLoggedIn} darkMode={darkMode} setDarkMode={setDarkMode} handleLogout={handleLogout} />
           <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-lg border border-slate-200 dark:border-slate-800 p-8">
             <div className="flex mb-6 bg-slate-100 dark:bg-slate-800 rounded-lg p-1">
               <button
@@ -452,7 +472,7 @@ export default function Home() {
     return (
       <main className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 p-6">
         <div className="max-w-7xl mx-auto">
-          <Header />
+          <Header username={username} isLoggedIn={isLoggedIn} darkMode={darkMode} setDarkMode={setDarkMode} handleLogout={handleLogout} />
           <div className="max-w-lg mx-auto bg-white dark:bg-slate-900 rounded-2xl shadow-lg border border-slate-200 dark:border-slate-800 p-8 mt-8">
             <h2 className="text-2xl font-bold text-center mb-1">Welcome, {username}!</h2>
             <p className="text-slate-500 dark:text-slate-400 text-center mb-8 text-sm">Join your team&apos;s organization or create a new one.</p>
@@ -509,7 +529,7 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 p-6">
       <div className="max-w-7xl mx-auto relative">
-        <Header />
+        <Header username={username} isLoggedIn={isLoggedIn} darkMode={darkMode} setDarkMode={setDarkMode} handleLogout={handleLogout} />
 
         {/* Org Banner */}
         <div className="flex flex-wrap justify-between items-center gap-4 bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800 mb-8">

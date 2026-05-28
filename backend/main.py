@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Request, HTTPException, Query
+from fastapi import FastAPI, Request, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
@@ -13,6 +14,8 @@ import binascii
 import urllib.request
 import json
 import ssl
+import jwt
+from datetime import datetime, timedelta, timezone
 
 # ==========================================
 # ENVIRONMENT CONFIGURATION (.env loader)
@@ -29,6 +32,27 @@ if os.path.exists(env_path):
 # ==========================================
 # AUTH CONFIGURATION
 # ==========================================
+security = HTTPBearer()
+JWT_SECRET = os.environ.get("JWT_SECRET", "super-secret-fallback")
+ALGORITHM = "HS256"
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(days=7)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=ALGORITHM)
+
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+        return username
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
 def get_password_hash(password: str) -> str:
     """Hash a password using PBKDF2-SHA512 with a random salt."""
     salt = hashlib.sha256(os.urandom(60)).hexdigest().encode("ascii")
@@ -93,7 +117,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[origin.strip() for origin in os.environ.get("ALLOWED_ORIGINS", "*").split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -169,8 +193,13 @@ def login_user(request: Request, user: UserCreate):
             role = "member"
             
     conn.close()
+    
+    access_token = create_access_token(data={"sub": user.username})
+    
     return {
         "message": "Login successful", 
+        "access_token": access_token,
+        "token_type": "bearer",
         "username": user.username,
         "org_code": org_code,
         "role": role,
@@ -182,7 +211,7 @@ def login_user(request: Request, user: UserCreate):
 # ==========================================
 @app.post("/api/orgs")
 @limiter.limit("5/minute")
-def create_org(request: Request, org_code: str = Query(...), username: str = Query(...)):
+def create_org(request: Request, org_code: str = Query(...), username: str = Depends(get_current_user)):
     """Create a new organization. The creator becomes admin and is auto-approved."""
     conn = get_db()
     c = conn.cursor()
@@ -200,7 +229,7 @@ def create_org(request: Request, org_code: str = Query(...), username: str = Que
 
 @app.post("/api/orgs/{org_code}/request")
 @limiter.limit("10/minute")
-def request_join_org(request: Request, org_code: str, username: str = Query(...)):
+def request_join_org(request: Request, org_code: str, username: str = Depends(get_current_user)):
     """Employee sends a join request to an organization."""
     conn = get_db()
     c = conn.cursor()
@@ -230,7 +259,7 @@ def request_join_org(request: Request, org_code: str, username: str = Query(...)
 
 @app.get("/api/orgs/{org_code}/requests")
 @limiter.limit("20/minute")
-def get_pending_requests(request: Request, org_code: str, username: str = Query(...)):
+def get_pending_requests(request: Request, org_code: str, username: str = Depends(get_current_user)):
     """Admin fetches pending join requests."""
     conn = get_db()
     c = conn.cursor()
@@ -248,7 +277,7 @@ def get_pending_requests(request: Request, org_code: str, username: str = Query(
 @app.patch("/api/orgs/{org_code}/members/{member_username}")
 @limiter.limit("10/minute")
 def handle_member_request(request: Request, org_code: str, member_username: str,
-                          body: MemberAction, username: str = Query(...)):
+                          body: MemberAction, username: str = Depends(get_current_user)):
     """Admin approves or rejects a join request."""
     conn = get_db()
     c = conn.cursor()
@@ -270,7 +299,7 @@ def handle_member_request(request: Request, org_code: str, member_username: str,
 
 @app.get("/api/orgs/{org_code}/members")
 @limiter.limit("20/minute")
-def get_members(request: Request, org_code: str):
+def get_members(request: Request, org_code: str, current_user: str = Depends(get_current_user)):
     """Get all approved members of an organization."""
     conn = get_db()
     c = conn.cursor()
@@ -281,7 +310,7 @@ def get_members(request: Request, org_code: str):
 
 @app.get("/api/orgs/{org_code}/role")
 @limiter.limit("20/minute")
-def get_user_role(request: Request, org_code: str, username: str = Query(...)):
+def get_user_role(request: Request, org_code: str, username: str = Depends(get_current_user)):
     """Check user's role and membership status in an org."""
     conn = get_db()
     c = conn.cursor()
@@ -303,7 +332,7 @@ def get_user_role(request: Request, org_code: str, username: str = Query(...)):
 # ==========================================
 @app.get("/api/tasks", response_model=List[Task])
 @limiter.limit("20/minute")
-def get_tasks(request: Request, org_code: str = Query(...)):
+def get_tasks(request: Request, org_code: str = Query(...), current_user: str = Depends(get_current_user)):
     conn = get_db()
     c = conn.cursor()
     c.execute("SELECT id, title, priority, assignee, due_date, status FROM tasks WHERE org_code = ?", (org_code,))
@@ -313,7 +342,7 @@ def get_tasks(request: Request, org_code: str = Query(...)):
 
 @app.post("/api/tasks", response_model=Task)
 @limiter.limit("10/minute")
-def create_task(request: Request, task: Task, org_code: str = Query(...)):
+def create_task(request: Request, task: Task, org_code: str = Query(...), current_user: str = Depends(get_current_user)):
     task.id = str(uuid.uuid4())
     conn = get_db()
     c = conn.cursor()
@@ -327,7 +356,7 @@ def create_task(request: Request, task: Task, org_code: str = Query(...)):
 
 @app.delete("/api/tasks/{task_id}")
 @limiter.limit("10/minute")
-def delete_task(request: Request, task_id: str):
+def delete_task(request: Request, task_id: str, current_user: str = Depends(get_current_user)):
     conn = get_db()
     c = conn.cursor()
     c.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
@@ -340,7 +369,7 @@ def delete_task(request: Request, task_id: str):
 
 @app.patch("/api/tasks/{task_id}/status")
 @limiter.limit("20/minute")
-def update_task_status(request: Request, task_id: str, body: StatusUpdate):
+def update_task_status(request: Request, task_id: str, body: StatusUpdate, current_user: str = Depends(get_current_user)):
     conn = get_db()
     c = conn.cursor()
     c.execute("UPDATE tasks SET status = ? WHERE id = ?", (body.status, task_id))
@@ -376,9 +405,8 @@ def call_gemini_api(prompt: str) -> Optional[str]:
             headers={"Content-Type": "application/json"},
             method="POST"
         )
-        context = ssl._create_unverified_context()
         # Using a 12 second timeout for external API call
-        with urllib.request.urlopen(req, timeout=12, context=context) as response:
+        with urllib.request.urlopen(req, timeout=12) as response:
             res_data = json.loads(response.read().decode("utf-8"))
             candidates = res_data.get("candidates", [])
             if candidates:
@@ -400,7 +428,7 @@ def call_gemini_api(prompt: str) -> Optional[str]:
 # ==========================================
 @app.post("/api/standup")
 @limiter.limit("5/minute")
-def generate_standup(request: Request, org_code: str = Query(...)):
+def generate_standup(request: Request, org_code: str = Query(...), current_user: str = Depends(get_current_user)):
     """Generate standup for ALL members in the organization using Gemini if configured, otherwise falls back to template."""
     import concurrent.futures
     conn = get_db()

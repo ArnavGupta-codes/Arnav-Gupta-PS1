@@ -1,6 +1,10 @@
 # FocusFlow
 
-Team Task Manager with AI Standup Assistant.
+**Project URL (live / deployed)**: [https://arnav-gupta-ps-1.vercel.app/](https://arnav-gupta-ps-1.vercel.app/)
+
+## Project Description
+
+**FocusFlow** is a modern, responsive team task manager featuring an AI-powered Standup Assistant. Designed to streamline collaboration and project tracking, FocusFlow enables teams to organize tasks through an intuitive Kanban board, manage workspaces and user roles (Admins and Employees), and automatically generate daily team standup updates using AI based on real-time task data.
 
 ## Features
 

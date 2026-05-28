@@ -9,7 +9,8 @@ import { Sun, Moon, LogOut, Copy, Zap, Plus, X, Users, Check, XCircle } from "lu
 const BACKEND_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api";
 const TASK_STATUS_COLUMNS = ["Todo", "In Progress", "Done"];
 
-const getAuthHeaders = () => {
+const getAuthHeaders = (): Record<string, string> => {
+  if (typeof window === "undefined") return {};
   const token = localStorage.getItem("ff_token");
   return token ? { "Authorization": `Bearer ${token}` } : {};
 };

@@ -71,7 +71,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # ==========================================
 # DATABASE SETUP
 # ==========================================
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "focusflow.db")
+DB_PATH = os.getenv("DATABASE_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "focusflow.db"))
 
 def get_db():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)

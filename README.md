@@ -70,5 +70,13 @@
 | POST | `/api/standup?org_code=X` | Generate AI standup for all approved members |
 
 ## Screenshots / Demo
+Light Mode
 <img width="1470" height="834" alt="image" src="https://github.com/user-attachments/assets/baf0c714-a760-47b6-a2d6-a309e39ca5fe" />
+
+Dark Mode
+<img width="1470" height="833" alt="image" src="https://github.com/user-attachments/assets/ab81f0a1-97ec-4e3f-b8ae-dad2b963a1ee" />
+
+View On Phone
+<img width="360" height="1600" alt="image" src="https://github.com/user-attachments/assets/a42673c2-3c90-4164-9b5f-f189c969a915" />
+
 
